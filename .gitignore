@@ -1,0 +1,36 @@
+# Secrets and runtime configuration
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+secrets/
+*.secret
+*.pem
+*.key
+
+# Local/runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Logs, backups and databases
+*.log
+*.bak
+*.backup
+*.dump
+backups/
+*.sqlite*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Release scratch
+*.tmp
+*.swp
