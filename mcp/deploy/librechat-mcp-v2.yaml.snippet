@@ -1,0 +1,19 @@
+# Merge into librechat.yaml; keep existing unrelated settings.
+mcpSettings:
+  allowedAddresses:
+    - "akamai-mfa-mcp-v2:9000"
+
+mcpServers:
+  akamai-mfa-v2:
+    type: streamable-http
+    url: "http://akamai-mfa-mcp-v2:9000/mcp"
+    requiresOAuth: false
+    initTimeout: 10000
+    timeout: 120000
+    serverInstructions: true
+    chatMenu: false
+    headers:
+      X-MFA-Ingress-Token: '${AKAMAI_MFA_MCP_INGRESS_TOKEN}'
+      X-MFA-Actor: '{{LIBRECHAT_USER_ID}}'
+      X-MFA-Session: '{{LIBRECHAT_BODY_CONVERSATIONID}}'
+      X-MFA-Interaction: '{{LIBRECHAT_BODY_MESSAGEID}}'
