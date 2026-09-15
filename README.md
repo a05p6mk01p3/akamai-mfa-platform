@@ -22,13 +22,11 @@ Production deployment must use OCI images pinned by digest. Do not rebuild the G
 
 ```text
 api/        frozen API 0.8.0 source
-a mcp/      frozen MCP 0.5.0 source
+mcp/        frozen MCP 0.5.0 source
 deploy/     sanitized deployment templates
 docs/       frozen release documentation
 release/    release identity and checksums
 ```
-
-> Note: the `mcp/` directory is the intended path; the spacing above is only documentation formatting and will be corrected when source is added.
 
 ## Security
 
