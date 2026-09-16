@@ -1,0 +1,32 @@
+[Unit]
+Description=Akamai MFA API v2
+After=network-online.target akamai-mfa-network.service akamai-mfa-postgres-v2.service
+Wants=network-online.target
+Requires=akamai-mfa-network.service akamai-mfa-postgres-v2.service
+
+[Container]
+ContainerName=akamai-mfa-api-v2
+Image=ghcr.io/a05p6mk01p3/akamai-mfa-api@sha256:5d79ba99978e5309a26f2f6aa1285b8c2da11547e47b1e55169e6f9252c6a8af
+
+Network=akamai-mfa.network
+DNS=10.89.0.1
+
+EnvironmentFile=/opt/akamai-mfa/config/api-v2/api-v2.env
+
+Secret=akamai-mfa-api-v2-client-token,target=akamai_client_token,uid=10001,gid=10001,mode=0400
+Secret=akamai-mfa-api-v2-client-secret,target=akamai_client_secret,uid=10001,gid=10001,mode=0400
+Secret=akamai-mfa-api-v2-access-token,target=akamai_access_token,uid=10001,gid=10001,mode=0400
+Secret=akamai-mfa-api-v2-database-url,target=database_url,uid=10001,gid=10001,mode=0400
+
+Volume=/opt/akamai-mfa/bin/akamai-mfa-api-v2-entrypoint.sh:/usr/local/bin/akamai-mfa-api-v2-entrypoint.sh:ro,Z
+
+Exec=/usr/local/bin/akamai-mfa-api-v2-entrypoint.sh
+
+[Service]
+ExecStartPost=/opt/akamai-mfa/bin/wait-api-v2-ready.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

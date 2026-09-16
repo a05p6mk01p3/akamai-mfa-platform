@@ -1,0 +1,3 @@
+[Network]
+NetworkName=akamai-mfa-net
+Driver=bridge

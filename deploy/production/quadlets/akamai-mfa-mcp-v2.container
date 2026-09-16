@@ -1,0 +1,26 @@
+[Unit]
+Description=Akamai MFA MCP v2
+After=network-online.target akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
+Wants=network-online.target
+Requires=akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
+
+[Container]
+ContainerName=akamai-mfa-mcp-v2
+Image=ghcr.io/a05p6mk01p3/akamai-mfa-mcp@sha256:07e5fa0d6a717b490360ee703a45bfca4bce971df54047d775ae8a7d9a9e484d
+
+Network=akamai-mfa.network
+Network=librechat.network
+DNS=10.89.0.1
+
+Secret=akamai-mfa-mcp-ingress-token,target=akamai-mfa-mcp-ingress-token,uid=999,gid=999,mode=0400
+
+EnvironmentFile=/opt/akamai-mfa/config/mcp-v2/mcp-v2.env
+
+[Service]
+ExecStartPost=/opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target
