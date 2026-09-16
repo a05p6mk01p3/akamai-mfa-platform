@@ -49,14 +49,24 @@ inspect_identity() {
     return 0
 }
 
+inspect_digest_only() {
+    ref=$1
+    label=$2
+    digest=$(podman image inspect "$ref" --format '{{.Digest}}' 2>/dev/null || true)
+    [ -n "$digest" ] || return 1
+    case "$ref" in
+        *@sha256:*) expected_digest=sha256:${ref##*@sha256:} ;;
+        *) fail "${label}_reference_not_digest_pinned" ;;
+    esac
+    [ "$digest" = "$expected_digest" ] || fail "${label}_digest_mismatch"
+    echo "${label}_IMAGE_IDENTITY=PASS"
+    return 0
+}
+
 if [ "$MODE" = check ]; then
     if inspect_identity "$API_REF" "$API_ID" API; then :; else echo "API_IMAGE_LOCAL=ABSENT"; fi
     if inspect_identity "$MCP_REF" "$MCP_ID" MCP; then :; else echo "MCP_IMAGE_LOCAL=ABSENT"; fi
-    if podman image inspect "$PG_REF" >/dev/null 2>&1; then
-        echo "POSTGRES_IMAGE_LOCAL=PRESENT"
-    else
-        echo "POSTGRES_IMAGE_LOCAL=ABSENT"
-    fi
+    if inspect_digest_only "$PG_REF" POSTGRES; then :; else echo "POSTGRES_IMAGE_LOCAL=ABSENT"; fi
     echo "PULL_IMAGES=CHECK_PASS"
     exit 0
 fi
@@ -76,9 +86,6 @@ pull_ref "$PG_REF"
 
 inspect_identity "$API_REF" "$API_ID" API || fail api_image_missing_after_pull
 inspect_identity "$MCP_REF" "$MCP_ID" MCP || fail mcp_image_missing_after_pull
-pg_digest=$(podman image inspect "$PG_REF" --format '{{.Digest}}' 2>/dev/null || true)
-[ "$pg_digest" = 'sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2' ] \
-    || fail postgres_digest_mismatch
+inspect_digest_only "$PG_REF" POSTGRES || fail postgres_image_missing_after_pull
 
-echo "POSTGRES_IMAGE_IDENTITY=PASS"
 echo "PULL_IMAGES=PASS"
