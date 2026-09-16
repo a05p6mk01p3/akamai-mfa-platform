@@ -68,8 +68,9 @@ For a new corporate host, prefer `automation/deploy-production.sh`. The manual p
 ## Network contract
 
 - PostgreSQL: `akamai-mfa-net` only.
-- API: `akamai-mfa-net` only, DNS `10.89.0.1`.
-- MCP: dual-homed on `akamai-mfa-net` and `librechat-net`, DNS `10.89.0.1`.
+- API: `akamai-mfa-net` only; DNS is supplied by the Podman network and must not be pinned to a fixed gateway address.
+- MCP: dual-homed on `akamai-mfa-net` and `librechat-net`; DNS is supplied by the attached Podman networks and must not be pinned to a fixed gateway address.
+- The network Quadlets intentionally do not pin subnets or gateways. Podman may allocate different RFC1918 subnets on different hosts, so container DNS configuration must remain network-relative rather than assuming a particular `10.89.x.1` address.
 - LibreChat itself uses `librechat.network`; MCP is the dual-homed component that provides the network path from LibreChat to the Akamai MFA API.
 - The LibreChat deployment remains responsible for its own application configuration and for injecting the same trusted-ingress secret into its runtime.
 
