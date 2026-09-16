@@ -1,5 +1,5 @@
 [Unit]
-Description=Akamai MFA MCP v2 candidate
+Description=Akamai MFA MCP v2
 After=network-online.target akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
 Wants=network-online.target
 Requires=akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
