@@ -35,34 +35,41 @@ require_cmd stat
 
 SECRETS='akamai-mfa-pg-v2-password akamai-mfa-api-v2-client-token akamai-mfa-api-v2-client-secret akamai-mfa-api-v2-access-token akamai-mfa-api-v2-database-url akamai-mfa-mcp-ingress-token'
 
+# Phase 1 is intentionally non-mutating. Validate the complete secret set before
+# creating any Podman secret so a later conflict cannot leave a partial install.
 for name in $SECRETS; do
     if podman secret inspect "$name" >/dev/null 2>&1; then
         if [ "$MODE" = check ]; then
             echo "SECRET_READY=$name source=podman"
             continue
         fi
-        if [ "$REUSE_EXISTING" -eq 1 ]; then
-            echo "SECRET_REUSED=$name"
-            continue
-        fi
-        fail "existing_secret_requires_reuse_flag_$name"
+        [ "$REUSE_EXISTING" -eq 1 ] || fail "existing_secret_requires_reuse_flag_$name"
+        continue
     fi
 
     src="$SECRETS_DIR/$name"
     require_protected_file "$src"
-
     if [ "$MODE" = check ]; then
         echo "SECRET_READY=$name source=file"
+    fi
+done
+
+if [ "$MODE" = check ]; then
+    echo "PROVISION_SECRETS=CHECK_PASS"
+    exit 0
+fi
+
+# Phase 2 mutates only after every secret has passed phase 1.
+for name in $SECRETS; do
+    if podman secret inspect "$name" >/dev/null 2>&1; then
+        echo "SECRET_REUSED=$name"
         continue
     fi
 
+    src="$SECRETS_DIR/$name"
     podman secret create "$name" "$src" >/dev/null
     podman secret inspect "$name" >/dev/null 2>&1 || fail "secret_create_verification_failed_$name"
     echo "SECRET_CREATED=$name"
 done
 
-if [ "$MODE" = check ]; then
-    echo "PROVISION_SECRETS=CHECK_PASS"
-else
-    echo "PROVISION_SECRETS=PASS"
-fi
+echo "PROVISION_SECRETS=PASS"
