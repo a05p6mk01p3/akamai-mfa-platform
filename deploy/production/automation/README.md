@@ -4,34 +4,14 @@ This directory adds fail-closed automation around the reviewed `deploy/productio
 
 ## Scope
 
-The automation targets a **new/clean host** using the validated production topology:
+The automation targets a **new/clean host**. Two explicit host profiles are available:
 
-- Oracle Linux 8.10 baseline;
-- systemd 239;
-- Podman 4.9.4-rhel with Quadlet;
-- SELinux enforcing;
-- synchronized system clock;
-- PostgreSQL, API and MCP on the same host;
-- MCP dual-homed on `akamai-mfa-net` and `librechat-net`;
-- LibreChat itself is managed separately and uses `librechat-net` to reach MCP.
+- `validated-ol8.10` (default): Oracle Linux 8.10, systemd 239, Podman 4.9.4-rhel, Quadlet, SELinux Enforcing;
+- `corporate-rhel8.7`: RHEL 8.7, systemd 239, Podman 4.9.4-rhel, Quadlet, SELinux Disabled. This profile exists to reproduce the supplied corporate Linux baseline and remains qualification evidence until a clean-host rehearsal completes successfully.
+
+Both profiles require a synchronized system clock, at least 5 GiB free on the container-storage filesystem, PostgreSQL/API/MCP on the same host, and the same frozen digest-pinned images. MCP remains dual-homed on `akamai-mfa-net` and `librechat-net`; LibreChat itself is managed separately and uses `librechat-net` to reach MCP.
 
 Deploying onto an already-active v2 host is refused. The historical v1 rollback process is also not synthesized here; `rollback.sh` is a clean-install **safe stop** that preserves data, secrets, images and configuration for diagnosis.
-
-## Files
-
-```text
-automation/
-├── common.sh
-├── host-preflight.sh
-├── pull-images.sh
-├── render-env.sh
-├── provision-secrets.sh
-├── bootstrap-db.sh
-├── rollback.sh
-├── deploy-production.sh
-├── production.conf.example
-└── README.md
-```
 
 ## Security model
 
@@ -75,7 +55,7 @@ MCP_DESTRUCTIVE_EXECUTION_MODE=disabled
 
 ## Non-mutating validation
 
-Run this before the change window:
+For the validated Oracle Linux profile:
 
 ```sh
 sudo sh deploy/production/automation/deploy-production.sh \
@@ -85,7 +65,13 @@ sudo sh deploy/production/automation/deploy-production.sh \
   --authfile /run/containers/0/auth.json
 ```
 
-`--check-only` does not pull images, write environment files, create secrets, install Quadlets, start services or apply a database migration. It validates the host baseline, configuration file, repository identity, secret readiness and any already-present image identity.
+For the supplied corporate RHEL 8.7 baseline, add:
+
+```text
+--host-profile corporate-rhel8.7
+```
+
+`--check-only` does not pull images, write environment files, create secrets, install Quadlets, start services or apply a database migration. It validates the selected host profile, configuration file, repository identity, secret readiness and any already-present image identity.
 
 Expected terminal gate:
 
@@ -93,7 +79,7 @@ Expected terminal gate:
 CHECK_ONLY=PASS
 ```
 
-`--allow-platform-drift` exists only for an explicitly approved compatibility test. It should not be used to bypass production qualification. `--skip-network-check` similarly requires an explicit operational reason.
+`--allow-platform-drift` exists only for an explicitly approved compatibility test and should not replace a named host profile. `--skip-network-check` similarly requires an explicit operational reason.
 
 ## Automated deployment
 
@@ -107,6 +93,8 @@ sudo sh deploy/production/automation/deploy-production.sh \
   --secrets-dir /run/akamai-mfa-secrets \
   --authfile /run/containers/0/auth.json
 ```
+
+Add `--host-profile corporate-rhel8.7` when using the supplied corporate rehearsal baseline.
 
 The flow is:
 
@@ -144,12 +132,6 @@ The script never drops a table, database or volume.
 
 ## Failure handling
 
-After service startup begins, any orchestrator failure invokes `rollback.sh`, which stops and disables MCP, API and PostgreSQL in reverse dependency order. It deliberately preserves:
+After service startup begins, any orchestrator failure invokes `rollback.sh`, which stops and disables MCP, API and PostgreSQL in reverse dependency order. It deliberately preserves PostgreSQL data, Podman secrets, pulled images, generated runtime env files, installed Quadlets and networks for diagnosis.
 
-- PostgreSQL volume/data;
-- Podman secrets;
-- pulled images;
-- generated runtime env files;
-- installed Quadlets and networks.
-
-That preservation makes incident evidence available and avoids destructive rollback behavior. For an established deployment, use the separately documented operational rollback procedure rather than this clean-host installer.
+For an established deployment, use the separately documented operational rollback procedure rather than this clean-host installer.
