@@ -32,7 +32,7 @@ options:
   --allow-platform-drift        explicitly allow host outside selected profile
   --skip-network-check          explicitly skip github.com/ghcr.io connectivity check
   --reuse-existing-secrets      reuse already-created Podman secrets
-  --approve-start               allow services to be enabled/started after preflight
+  --approve-start               allow services to be started after preflight
 EOF
 }
 
@@ -60,7 +60,43 @@ done
 
 [ -n "$MODE" ] || fail mode_required
 require_root
-for cmd in git podman systemctl; do require_cmd "$cmd"; done
+for cmd in git podman systemctl ln readlink rm; do require_cmd "$cmd"; done
+
+APP_UNITS='akamai-mfa-postgres-v2.service akamai-mfa-api-v2.service akamai-mfa-mcp-v2.service'
+
+mask_runtime_unit() {
+    unit=$1
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+    if ! systemctl mask "$unit" >/dev/null 2>&1; then
+        ln -sfn /dev/null "/etc/systemd/system/$unit"
+    fi
+}
+
+unmask_runtime_unit() {
+    unit=$1
+    systemctl unmask "$unit" >/dev/null 2>&1 || true
+    mask_path="/etc/systemd/system/$unit"
+    if [ -L "$mask_path" ]; then
+        target=$(readlink "$mask_path" 2>/dev/null || true)
+        if [ "$target" = /dev/null ]; then
+            rm -f "$mask_path"
+        fi
+    fi
+}
+
+verify_masked() {
+    unit=$1
+    state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+    [ "$state" = masked ] || fail "unit_not_masked_$unit"
+    echo "UNIT_MASKED=$unit"
+}
+
+verify_unmasked() {
+    unit=$1
+    state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+    [ "$state" != masked ] || fail "unit_remains_masked_$unit"
+    echo "UNIT_UNMASKED=$unit"
+}
 
 on_exit() {
     rc=$?
@@ -103,7 +139,7 @@ else
 fi
 
 existing_active=0
-for unit in akamai-mfa-postgres-v2.service akamai-mfa-api-v2.service akamai-mfa-mcp-v2.service; do
+for unit in $APP_UNITS; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
         existing_active=1
         echo "TARGET_ACTIVE_UNIT=$unit"
@@ -143,27 +179,50 @@ else
     sh "$BASE_DIR/provision-secrets.sh" --apply --secrets-dir "$SECRETS_DIR"
 fi
 
+# Quadlet-generated units are transient/generated systemd units. They cannot be
+# enabled with `systemctl enable`. Boot persistence is provided by each
+# container Quadlet's [Install] WantedBy=multi-user.target, which the Quadlet
+# generator materializes on every boot/daemon-reload. A staged deployment is
+# masked so it remains stopped even if the host reboots before approval.
+if [ "$APPROVE_START" -eq 1 ]; then
+    ROLLBACK_ARMED=1
+    for unit in $APP_UNITS; do
+        unmask_runtime_unit "$unit"
+    done
+    systemctl daemon-reload
+    for unit in $APP_UNITS; do
+        verify_unmasked "$unit"
+    done
+fi
+
 sh "$PROD_DIR/preflight.sh"
 
 if [ "$APPROVE_START" -ne 1 ]; then
+    for unit in $APP_UNITS; do
+        mask_runtime_unit "$unit"
+    done
+    systemctl daemon-reload
+    for unit in $APP_UNITS; do
+        verify_masked "$unit"
+    done
+    echo "STAGED_SAFE_STOP=PASS"
     echo "DEPLOYMENT=READY_TO_START"
     echo "NEXT=rerun_with_--deploy_--approve-start_--reuse-existing-secrets"
     trap - EXIT HUP INT TERM
     exit 0
 fi
 
-ROLLBACK_ARMED=1
-systemctl enable --now akamai-mfa-network.service
-systemctl enable --now librechat-network.service
-systemctl enable --now akamai-mfa-postgres-v2.service
+systemctl start akamai-mfa-network.service
+systemctl start librechat-network.service
+systemctl start akamai-mfa-postgres-v2.service
 /opt/akamai-mfa/bin/wait-postgres-v2-ready.sh
 
 sh "$BASE_DIR/bootstrap-db.sh"
 
-systemctl enable --now akamai-mfa-api-v2.service
+systemctl start akamai-mfa-api-v2.service
 /opt/akamai-mfa/bin/wait-api-v2-ready.sh
 
-systemctl enable --now akamai-mfa-mcp-v2.service
+systemctl start akamai-mfa-mcp-v2.service
 /opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
 
 sh "$PROD_DIR/smoke.sh"
