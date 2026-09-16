@@ -66,13 +66,20 @@ on_exit() {
     fi
     exit "$rc"
 }
-trap on_exit EXIT HUP INT TERM
+trap on_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-host_args=''
-[ "$ALLOW_PLATFORM_DRIFT" -eq 1 ] && host_args="$host_args --allow-platform-drift"
-[ "$SKIP_NETWORK_CHECK" -eq 1 ] && host_args="$host_args --skip-network-check"
-# shellcheck disable=SC2086
-sh "$BASE_DIR/host-preflight.sh" $host_args
+if [ "$ALLOW_PLATFORM_DRIFT" -eq 1 ] && [ "$SKIP_NETWORK_CHECK" -eq 1 ]; then
+    sh "$BASE_DIR/host-preflight.sh" --allow-platform-drift --skip-network-check
+elif [ "$ALLOW_PLATFORM_DRIFT" -eq 1 ]; then
+    sh "$BASE_DIR/host-preflight.sh" --allow-platform-drift
+elif [ "$SKIP_NETWORK_CHECK" -eq 1 ]; then
+    sh "$BASE_DIR/host-preflight.sh" --skip-network-check
+else
+    sh "$BASE_DIR/host-preflight.sh"
+fi
 
 sh "$BASE_DIR/render-env.sh" --check-only --config "$CONFIG"
 
@@ -83,18 +90,13 @@ actual_commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
 [ -z "$(git -C "$REPO_ROOT" status --porcelain)" ] || fail repo_worktree_not_clean
 echo "REPO_IDENTITY=PASS"
 
-secret_check_args="--check-only --secrets-dir $SECRETS_DIR"
-# Paths with whitespace are not supported by the automation interface.
-case "$SECRETS_DIR$AUTHFILE$CONFIG" in
-    *' '*) fail paths_with_spaces_not_supported ;;
-esac
-# shellcheck disable=SC2086
-sh "$BASE_DIR/provision-secrets.sh" $secret_check_args
+sh "$BASE_DIR/provision-secrets.sh" --check-only --secrets-dir "$SECRETS_DIR"
 
-pull_check_args='--check-only'
-[ -n "$AUTHFILE" ] && pull_check_args="$pull_check_args --authfile $AUTHFILE"
-# shellcheck disable=SC2086
-sh "$BASE_DIR/pull-images.sh" $pull_check_args
+if [ -n "$AUTHFILE" ]; then
+    sh "$BASE_DIR/pull-images.sh" --check-only --authfile "$AUTHFILE"
+else
+    sh "$BASE_DIR/pull-images.sh" --check-only
+fi
 
 existing_active=0
 for unit in akamai-mfa-postgres-v2.service akamai-mfa-api-v2.service akamai-mfa-mcp-v2.service; do
@@ -122,18 +124,20 @@ for name in akamai-mfa-postgres-v2 akamai-mfa-api-v2 akamai-mfa-mcp-v2; do
     fi
 done
 
-pull_args=''
-[ -n "$AUTHFILE" ] && pull_args="--authfile $AUTHFILE"
-# shellcheck disable=SC2086
-sh "$BASE_DIR/pull-images.sh" $pull_args
+if [ -n "$AUTHFILE" ]; then
+    sh "$BASE_DIR/pull-images.sh" --authfile "$AUTHFILE"
+else
+    sh "$BASE_DIR/pull-images.sh"
+fi
 
 sh "$PROD_DIR/install.sh"
 sh "$BASE_DIR/render-env.sh" --apply --config "$CONFIG"
 
-secret_apply_args="--apply --secrets-dir $SECRETS_DIR"
-[ "$REUSE_EXISTING_SECRETS" -eq 1 ] && secret_apply_args="$secret_apply_args --reuse-existing"
-# shellcheck disable=SC2086
-sh "$BASE_DIR/provision-secrets.sh" $secret_apply_args
+if [ "$REUSE_EXISTING_SECRETS" -eq 1 ]; then
+    sh "$BASE_DIR/provision-secrets.sh" --apply --secrets-dir "$SECRETS_DIR" --reuse-existing
+else
+    sh "$BASE_DIR/provision-secrets.sh" --apply --secrets-dir "$SECRETS_DIR"
+fi
 
 sh "$PROD_DIR/preflight.sh"
 
