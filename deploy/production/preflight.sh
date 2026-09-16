@@ -19,9 +19,10 @@ for f in \
 do
     [ -f "$f" ] || fail "missing_env_file_$f"
     [ "$(stat -c '%U' "$f")" = root ] || fail "env_not_root_owned_$f"
+    [ "$(stat -c '%G' "$f")" = root ] || fail "env_not_root_group_$f"
     mode=$(stat -c '%a' "$f")
     case "$mode" in
-        400|600) ;;
+        400|600|640) ;;
         *) fail "env_permissions_$f=$mode" ;;
     esac
     if grep -q 'CHANGE_ME' "$f"; then
