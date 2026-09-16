@@ -48,6 +48,16 @@ grep -F 'systemctl mask' "$BASE_DIR/rollback.sh" >/dev/null \
     || fail rollback_mask_missing
 echo "QUADLET_START_SEMANTICS=PASS"
 
+for q in \
+    "$PROD_DIR/quadlets/akamai-mfa-api-v2.container" \
+    "$PROD_DIR/quadlets/akamai-mfa-mcp-v2.container"
+do
+    if grep -Eq '^DNS=' "$q"; then
+        fail "fixed_container_dns_not_allowed_$(basename "$q")"
+    fi
+done
+echo "PORTABLE_NETWORK_DNS=PASS"
+
 grep -Fx 'EXECUTION_BACKEND=simulation' "$PROD_DIR/env/api-v2.env.example" >/dev/null \
     || fail api_safe_state_missing
 grep -Fx 'MCP_DESTRUCTIVE_EXECUTION_MODE=disabled' "$PROD_DIR/env/mcp-v2.env.example" >/dev/null \
