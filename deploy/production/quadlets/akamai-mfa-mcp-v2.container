@@ -1,5 +1,5 @@
 [Unit]
-Description=Akamai MFA MCP v2
+Description=Akamai MFA MCP v2 candidate
 After=network-online.target akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
 Wants=network-online.target
 Requires=akamai-mfa-network.service librechat-network.service akamai-mfa-api-v2.service
@@ -10,7 +10,6 @@ Image=ghcr.io/a05p6mk01p3/akamai-mfa-mcp@sha256:07e5fa0d6a717b490360ee703a45bfca
 
 Network=akamai-mfa.network
 Network=librechat.network
-DNS=10.89.0.1
 
 Secret=akamai-mfa-mcp-ingress-token,target=akamai-mfa-mcp-ingress-token,uid=999,gid=999,mode=0400
 

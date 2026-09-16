@@ -30,6 +30,17 @@ The initial production cutover must retain that state. Permanent destructive ena
 
 ```text
 production/
+├── automation/
+│   ├── deploy-production.sh
+│   ├── host-preflight.sh
+│   ├── pull-images.sh
+│   ├── render-env.sh
+│   ├── provision-secrets.sh
+│   ├── bootstrap-db.sh
+│   ├── rollback.sh
+│   ├── common.sh
+│   ├── production.conf.example
+│   └── README.md
 ├── quadlets/
 │   ├── akamai-mfa-postgres-v2.container
 │   ├── akamai-mfa-api-v2.container
@@ -52,16 +63,47 @@ production/
 └── README.md
 ```
 
+For a new corporate host, prefer `automation/deploy-production.sh`. The manual procedure below remains the reference for inspecting each deployment stage.
+
 ## Network contract
 
 - PostgreSQL: `akamai-mfa-net` only.
-- API: `akamai-mfa-net` only, DNS `10.89.0.1`.
-- MCP: dual-homed on `akamai-mfa-net` and `librechat-net`, DNS `10.89.0.1`.
+- API: `akamai-mfa-net` only; DNS is supplied by the Podman network and must not be pinned to a fixed gateway address.
+- MCP: dual-homed on `akamai-mfa-net` and `librechat-net`; DNS is supplied by the attached Podman networks and must not be pinned to a fixed gateway address.
+- The network Quadlets intentionally do not pin subnets or gateways. Podman may allocate different RFC1918 subnets on different hosts, so container DNS configuration must remain network-relative rather than assuming a particular `10.89.x.1` address.
+- LibreChat itself uses `librechat.network`; MCP is the dual-homed component that provides the network path from LibreChat to the Akamai MFA API.
 - The LibreChat deployment remains responsible for its own application configuration and for injecting the same trusted-ingress secret into its runtime.
 
 If the production LibreChat installation already owns `/etc/containers/systemd/librechat.network`, it must be reviewed for equivalence before using this bundle. `install.sh` refuses to overwrite a differing existing file.
 
-## 1. Authenticate and pull immutable images
+## Automated clean-host deployment
+
+See `automation/README.md`. The non-mutating gate is:
+
+```sh
+sudo sh automation/deploy-production.sh \
+  --check-only \
+  --config /etc/akamai-mfa/production.conf \
+  --secrets-dir /run/akamai-mfa-secrets \
+  --authfile /run/containers/0/auth.json
+```
+
+The deployment command is:
+
+```sh
+sudo sh automation/deploy-production.sh \
+  --deploy \
+  --approve-start \
+  --config /etc/akamai-mfa/production.conf \
+  --secrets-dir /run/akamai-mfa-secrets \
+  --authfile /run/containers/0/auth.json
+```
+
+The automation is intentionally limited to a new/clean host and refuses an already-active v2 deployment.
+
+## Manual procedure
+
+### 1. Authenticate and pull immutable images
 
 Authenticate locally to the private GHCR packages using a pull-only credential. Never paste the token into documentation, shell history, or issue/PR text.
 
@@ -75,7 +117,7 @@ podman pull docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824
 
 Run these as the same user context that will run the system Quadlets (root for the validated deployment).
 
-## 2. Install static deployment files
+### 2. Install static deployment files
 
 From this directory:
 
@@ -92,7 +134,7 @@ The installer:
 - refuses to overwrite a differing existing deployment file;
 - does not start containers.
 
-## 3. Create live environment files locally
+### 3. Create live environment files locally
 
 Copy each example to its live path and replace every `CHANGE_ME` using the approved production values:
 
@@ -104,9 +146,9 @@ Copy each example to its live path and replace every `CHANGE_ME` using the appro
 
 Set ownership to `root:root`. Supported modes are `0600`, `0640`, or `0400`; when `0640` is used, the group must remain `root`. Do not put Akamai tokens, database credentials, or the trusted-ingress token in these files.
 
-The API example intentionally leaves deployment-specific non-secret values such as retention/timeout and `NO_PROXY` as `CHANGE_ME`; copy those values from the approved production configuration rather than from historical development examples.
+All deployment-specific non-secret values are intentionally `CHANGE_ME` in the examples unless they are part of the frozen safe-state contract or a fixed Podman secret path. Copy approved values rather than inferring defaults.
 
-## 4. Provision Podman secrets
+### 4. Provision Podman secrets
 
 The deployment requires these secret names:
 
@@ -123,7 +165,7 @@ Create them locally from protected input/stdin. Never pass secret values as comm
 
 The PostgreSQL environment points `POSTGRES_PASSWORD_FILE` at `/run/secrets/pg_password`. The API wrapper reads its four required secret files under `/run/secrets`. MCP reads its trusted-ingress credential from `/run/secrets/akamai-mfa-mcp-ingress-token`.
 
-## 5. Run preflight
+### 5. Run preflight
 
 After images, live env files, and secrets are provisioned:
 
@@ -139,19 +181,41 @@ PREFLIGHT=PASS
 
 The preflight does not start application containers. It checks safe-state configuration, required secret objects, exact digest-pinned images, installed files, and generated systemd units.
 
-## 6. Start in dependency order
+### 6. Start networks and PostgreSQL, then bootstrap the clean database
+
+Quadlet-generated systemd services are generated/transient units and are not enabled with `systemctl enable`. Boot persistence for PostgreSQL/API/MCP is supplied by `WantedBy=multi-user.target` in the container Quadlets, which the Quadlet generator materializes at boot and daemon-reload.
+
+Start the generated units directly:
 
 ```sh
-sudo systemctl enable --now akamai-mfa-network.service
-sudo systemctl enable --now librechat-network.service
-sudo systemctl enable --now akamai-mfa-postgres-v2.service
-sudo systemctl enable --now akamai-mfa-api-v2.service
-sudo systemctl enable --now akamai-mfa-mcp-v2.service
+sudo systemctl start akamai-mfa-network.service
+sudo systemctl start librechat-network.service
+sudo systemctl start akamai-mfa-postgres-v2.service
+sudo /opt/akamai-mfa/bin/wait-postgres-v2-ready.sh
 ```
 
-If `librechat-network.service` is already enabled by the existing LibreChat deployment, do not replace or recreate its network; verify it and continue.
+On a new database, apply the frozen v2 repository migration before starting the API:
 
-## 7. Non-destructive smoke
+```sh
+cat ../../api/migrations/001_v2_repository.sql | \
+  sudo podman exec -i akamai-mfa-postgres-v2 \
+    sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+The automated installer performs this step through `automation/bootstrap-db.sh` and fails closed if it detects a partial schema.
+
+### 7. Start API and MCP in dependency order
+
+```sh
+sudo systemctl start akamai-mfa-api-v2.service
+sudo /opt/akamai-mfa/bin/wait-api-v2-ready.sh
+sudo systemctl start akamai-mfa-mcp-v2.service
+sudo /opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
+```
+
+If `librechat-network.service` is already supplied by the existing LibreChat deployment, do not replace or recreate its network; verify it and continue.
+
+### 8. Non-destructive smoke
 
 ```sh
 sudo sh ./smoke.sh
@@ -168,12 +232,14 @@ This smoke checks service/readiness state and verifies `EXECUTION_BACKEND=simula
 
 ## LibreChat integration
 
-The validated LibreChat service depends on the MCP service, joins both the LibreChat and Akamai MFA networking context as required by the existing deployment, and mounts the same trusted-ingress secret. LibreChat-specific Quadlet/YAML files are deliberately not synthesized in this bundle because their complete production image/config identity was not part of the supplied G5 publication data. Preserve the already-reviewed LibreChat deployment or review its production artifacts separately before cutover.
+The validated topology has LibreChat on `librechat.network` only. MCP is dual-homed on `librechat-net` and `akamai-mfa-net`, depends on the API, and provides the network bridge between the LibreChat side and the API side. LibreChat depends on MCP and mounts the same trusted-ingress secret. LibreChat-specific Quadlet/YAML files are deliberately not synthesized in this bundle because their complete production image/config identity was not part of the supplied G5 publication data. Preserve the already-reviewed LibreChat deployment or review its production artifacts separately before cutover.
 
 ## Rollback
 
 Do not overwrite or delete the frozen v1 assets. The historical G4 rehearsal demonstrated rollback within the release target. Use `docs/OPERATIONS-AND-ROLLBACK.md` for rollback triggers and the preserved v1 image/Quadlet identities.
 
+For a new clean host, `automation/rollback.sh` is deliberately narrower: it safe-stops and persistently masks the newly started v2 PostgreSQL/API/MCP services while preserving data and configuration for diagnosis. Masking is required because generated Quadlet services cannot be persistently disabled with `systemctl disable`; their `[Install]` wiring is regenerated. It is not a substitute for the historical v1 rollback procedure.
+
 ## Provenance
 
-See `release/IMAGE-IDENTITY.md` for the GHCR promotion mapping and `docs/G5-RELEASE-CHECKLIST.md` for release evidence. The `v2.0.0` tag remains the frozen application release; this production bundle is an operational deployment addition and must not rewrite that tag.
+See `release/IMAGE-IDENTITY.md` and `release/GHCR-PROMOTION-ATTESTATION.md` for publication identity/evidence and `docs/G5-RELEASE-CHECKLIST.md` for release evidence. The `v2.0.0` tag remains the frozen application release; this production bundle is an operational deployment addition and must not rewrite that tag.

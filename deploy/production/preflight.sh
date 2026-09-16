@@ -8,7 +8,9 @@ fail() {
 
 [ "$(id -u)" -eq 0 ] || fail root_required
 
-for cmd in podman systemctl grep stat; do
+BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+for cmd in podman systemctl grep stat cmp; do
     command -v "$cmd" >/dev/null 2>&1 || fail "missing_command_$cmd"
 done
 
@@ -51,7 +53,9 @@ do
 done
 
 API_REF='ghcr.io/a05p6mk01p3/akamai-mfa-api@sha256:5d79ba99978e5309a26f2f6aa1285b8c2da11547e47b1e55169e6f9252c6a8af'
+API_ID='650a0e1b1dedb1f696cc34feac334c5fb9da59a2d8fcabf3a348f50e19814512'
 MCP_REF='ghcr.io/a05p6mk01p3/akamai-mfa-mcp@sha256:07e5fa0d6a717b490360ee703a45bfca4bce971df54047d775ae8a7d9a9e484d'
+MCP_ID='d865a90ea546edcf7df039b2007e1f31528acc174d98fec513d957e15264d213'
 PG_REF='docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2'
 
 for ref in "$API_REF" "$MCP_REF" "$PG_REF"; do
@@ -59,19 +63,33 @@ for ref in "$API_REF" "$MCP_REF" "$PG_REF"; do
         || fail "missing_image_$ref"
 done
 
-for f in \
-    /etc/containers/systemd/akamai-mfa.network \
-    /etc/containers/systemd/librechat.network \
-    /etc/containers/systemd/akamai-mfa-postgres-v2.container \
-    /etc/containers/systemd/akamai-mfa-api-v2.container \
-    /etc/containers/systemd/akamai-mfa-mcp-v2.container \
-    /opt/akamai-mfa/bin/akamai-mfa-api-v2-entrypoint.sh \
-    /opt/akamai-mfa/bin/wait-postgres-v2-ready.sh \
-    /opt/akamai-mfa/bin/wait-api-v2-ready.sh \
-    /opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
-do
-    [ -f "$f" ] || fail "missing_installed_file_$f"
-done
+[ "$(podman image inspect "$API_REF" --format '{{.Id}}')" = "$API_ID" ] \
+    || fail api_image_id_mismatch
+[ "$(podman image inspect "$MCP_REF" --format '{{.Id}}')" = "$MCP_ID" ] \
+    || fail mcp_image_id_mismatch
+[ "$(podman image inspect "$API_REF" --format '{{.Digest}}')" = 'sha256:5d79ba99978e5309a26f2f6aa1285b8c2da11547e47b1e55169e6f9252c6a8af' ] \
+    || fail api_image_digest_mismatch
+[ "$(podman image inspect "$MCP_REF" --format '{{.Digest}}')" = 'sha256:07e5fa0d6a717b490360ee703a45bfca4bce971df54047d775ae8a7d9a9e484d' ] \
+    || fail mcp_image_digest_mismatch
+[ "$(podman image inspect "$PG_REF" --format '{{.Digest}}')" = 'sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2' ] \
+    || fail postgres_image_digest_mismatch
+
+check_static() {
+    src=$1
+    dst=$2
+    [ -f "$dst" ] || fail "missing_installed_file_$dst"
+    cmp -s "$src" "$dst" || fail "installed_file_differs_$dst"
+}
+
+check_static "$BASE_DIR/networks/akamai-mfa.network" /etc/containers/systemd/akamai-mfa.network
+check_static "$BASE_DIR/networks/librechat.network" /etc/containers/systemd/librechat.network
+check_static "$BASE_DIR/quadlets/akamai-mfa-postgres-v2.container" /etc/containers/systemd/akamai-mfa-postgres-v2.container
+check_static "$BASE_DIR/quadlets/akamai-mfa-api-v2.container" /etc/containers/systemd/akamai-mfa-api-v2.container
+check_static "$BASE_DIR/quadlets/akamai-mfa-mcp-v2.container" /etc/containers/systemd/akamai-mfa-mcp-v2.container
+check_static "$BASE_DIR/bin/akamai-mfa-api-v2-entrypoint.sh" /opt/akamai-mfa/bin/akamai-mfa-api-v2-entrypoint.sh
+check_static "$BASE_DIR/bin/wait-postgres-v2-ready.sh" /opt/akamai-mfa/bin/wait-postgres-v2-ready.sh
+check_static "$BASE_DIR/bin/wait-api-v2-ready.sh" /opt/akamai-mfa/bin/wait-api-v2-ready.sh
+check_static "$BASE_DIR/bin/wait-mcp-v2-ready.sh" /opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
 
 systemctl daemon-reload
 
@@ -85,4 +103,6 @@ do
     systemctl cat "$unit" >/dev/null 2>&1 || fail "unit_not_generated_$unit"
 done
 
+echo "STATIC_IDENTITY=PASS"
+echo "IMAGE_IDENTITY=PASS"
 echo "PREFLIGHT=PASS"

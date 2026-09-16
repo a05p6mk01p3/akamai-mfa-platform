@@ -9,7 +9,6 @@ ContainerName=akamai-mfa-api-v2
 Image=ghcr.io/a05p6mk01p3/akamai-mfa-api@sha256:5d79ba99978e5309a26f2f6aa1285b8c2da11547e47b1e55169e6f9252c6a8af
 
 Network=akamai-mfa.network
-DNS=10.89.0.1
 
 EnvironmentFile=/opt/akamai-mfa/config/api-v2/api-v2.env
 
