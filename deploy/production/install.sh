@@ -11,6 +11,29 @@ QUADLET_DIR=/etc/containers/systemd
 BIN_DIR=/opt/akamai-mfa/bin
 CONFIG_DIR=/opt/akamai-mfa/config
 
+precheck_safe() {
+    src="$1"
+    dst="$2"
+    if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then
+        echo "INSTALL=FAIL reason=existing_file_differs path=$dst" >&2
+        exit 1
+    fi
+}
+
+# Validate every destination before creating directories or copying any file.
+precheck_safe "$BASE_DIR/networks/akamai-mfa.network" "$QUADLET_DIR/akamai-mfa.network"
+precheck_safe "$BASE_DIR/networks/librechat.network" "$QUADLET_DIR/librechat.network"
+precheck_safe "$BASE_DIR/quadlets/akamai-mfa-postgres-v2.container" "$QUADLET_DIR/akamai-mfa-postgres-v2.container"
+precheck_safe "$BASE_DIR/quadlets/akamai-mfa-api-v2.container" "$QUADLET_DIR/akamai-mfa-api-v2.container"
+precheck_safe "$BASE_DIR/quadlets/akamai-mfa-mcp-v2.container" "$QUADLET_DIR/akamai-mfa-mcp-v2.container"
+precheck_safe "$BASE_DIR/bin/akamai-mfa-api-v2-entrypoint.sh" "$BIN_DIR/akamai-mfa-api-v2-entrypoint.sh"
+precheck_safe "$BASE_DIR/bin/wait-postgres-v2-ready.sh" "$BIN_DIR/wait-postgres-v2-ready.sh"
+precheck_safe "$BASE_DIR/bin/wait-api-v2-ready.sh" "$BIN_DIR/wait-api-v2-ready.sh"
+precheck_safe "$BASE_DIR/bin/wait-mcp-v2-ready.sh" "$BIN_DIR/wait-mcp-v2-ready.sh"
+precheck_safe "$BASE_DIR/env/postgres-v2.env.example" "$CONFIG_DIR/postgres-v2/postgres-v2.env.example"
+precheck_safe "$BASE_DIR/env/api-v2.env.example" "$CONFIG_DIR/api-v2/api-v2.env.example"
+precheck_safe "$BASE_DIR/env/mcp-v2.env.example" "$CONFIG_DIR/mcp-v2/mcp-v2.env.example"
+
 install -d -m 0755 "$QUADLET_DIR" "$BIN_DIR"
 install -d -m 0700 \
     "$CONFIG_DIR/postgres-v2" \
@@ -23,15 +46,11 @@ install_safe() {
     mode="$3"
 
     if [ -e "$dst" ]; then
-        if ! cmp -s "$src" "$dst"; then
-            echo "INSTALL=FAIL reason=existing_file_differs path=$dst" >&2
-            exit 1
-        fi
         echo "UNCHANGED=$dst"
         return 0
     fi
 
-    install -m "$mode" "$src" "$dst"
+    install -o root -g root -m "$mode" "$src" "$dst"
     echo "INSTALLED=$dst"
 }
 
@@ -48,9 +67,9 @@ install_safe "$BASE_DIR/bin/wait-api-v2-ready.sh" "$BIN_DIR/wait-api-v2-ready.sh
 install_safe "$BASE_DIR/bin/wait-mcp-v2-ready.sh" "$BIN_DIR/wait-mcp-v2-ready.sh" 0755
 
 # Examples only. install.sh deliberately does not create live environment files.
-install -m 0600 "$BASE_DIR/env/postgres-v2.env.example" "$CONFIG_DIR/postgres-v2/postgres-v2.env.example"
-install -m 0600 "$BASE_DIR/env/api-v2.env.example" "$CONFIG_DIR/api-v2/api-v2.env.example"
-install -m 0600 "$BASE_DIR/env/mcp-v2.env.example" "$CONFIG_DIR/mcp-v2/mcp-v2.env.example"
+install_safe "$BASE_DIR/env/postgres-v2.env.example" "$CONFIG_DIR/postgres-v2/postgres-v2.env.example" 0600
+install_safe "$BASE_DIR/env/api-v2.env.example" "$CONFIG_DIR/api-v2/api-v2.env.example" 0600
+install_safe "$BASE_DIR/env/mcp-v2.env.example" "$CONFIG_DIR/mcp-v2/mcp-v2.env.example" 0600
 
 systemctl daemon-reload
 
