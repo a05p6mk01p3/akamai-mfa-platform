@@ -7,13 +7,19 @@ RESULT_LABEL=HOST_PREFLIGHT
 
 ALLOW_PLATFORM_DRIFT=0
 SKIP_NETWORK_CHECK=0
+HOST_PROFILE=validated-ol8.10
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --host-profile)
+            shift
+            [ "$#" -gt 0 ] || fail missing_host_profile_argument
+            HOST_PROFILE=$1
+            ;;
         --allow-platform-drift) ALLOW_PLATFORM_DRIFT=1 ;;
         --skip-network-check) SKIP_NETWORK_CHECK=1 ;;
         -h|--help)
-            echo "usage: $0 [--allow-platform-drift] [--skip-network-check]"
+            echo "usage: $0 [--host-profile validated-ol8.10|corporate-rhel8.7] [--allow-platform-drift] [--skip-network-check]"
             exit 0
             ;;
         *) fail "unknown_argument_$1" ;;
@@ -30,20 +36,34 @@ done
 # /etc/os-release is a root-owned operating-system metadata file.
 . /etc/os-release
 
+case "$HOST_PROFILE" in
+    validated-ol8.10)
+        EXPECTED_ID=ol
+        EXPECTED_VERSION_ID=8.10
+        EXPECTED_SELINUX=Enforcing
+        ;;
+    corporate-rhel8.7)
+        EXPECTED_ID=rhel
+        EXPECTED_VERSION_ID=8.7
+        EXPECTED_SELINUX=Disabled
+        ;;
+    *) fail "unknown_host_profile_$HOST_PROFILE" ;;
+esac
+
 platform_ok=1
-[ "${ID:-}" = ol ] || platform_ok=0
-[ "${VERSION_ID:-}" = 8.10 ] || platform_ok=0
+[ "${ID:-}" = "$EXPECTED_ID" ] || platform_ok=0
+[ "${VERSION_ID:-}" = "$EXPECTED_VERSION_ID" ] || platform_ok=0
 podman --version | grep -q '4\.9\.4-rhel' || platform_ok=0
 systemctl --version | head -1 | grep -q '^systemd 239' || platform_ok=0
 
 if [ "$platform_ok" -ne 1 ]; then
     if [ "$ALLOW_PLATFORM_DRIFT" -eq 1 ]; then
-        echo "PLATFORM_BASELINE=DRIFT_ALLOWED"
+        echo "PLATFORM_BASELINE=DRIFT_ALLOWED profile=$HOST_PROFILE"
     else
-        fail platform_outside_validated_ol8_10_podman4_9_4_systemd239
+        fail "platform_outside_profile_$HOST_PROFILE"
     fi
 else
-    echo "PLATFORM_BASELINE=PASS"
+    echo "PLATFORM_BASELINE=PASS profile=$HOST_PROFILE"
 fi
 
 quadlet_generator=''
@@ -60,8 +80,10 @@ done
 echo "QUADLET=PASS"
 
 require_cmd getenforce
-[ "$(getenforce)" = Enforcing ] || fail selinux_not_enforcing
-echo "SELINUX=PASS"
+actual_selinux=$(getenforce)
+[ "$actual_selinux" = "$EXPECTED_SELINUX" ] \
+    || fail "selinux_state_${actual_selinux}_expected_${EXPECTED_SELINUX}_for_$HOST_PROFILE"
+echo "SELINUX=PASS profile=$HOST_PROFILE state=$actual_selinux"
 
 sync=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)
 if [ "$sync" != yes ]; then
