@@ -80,7 +80,7 @@ Run these as the same user context that will run the system Quadlets (root for t
 From this directory:
 
 ```sh
-sudo ./install.sh
+sudo sh ./install.sh
 ```
 
 The installer:
@@ -102,7 +102,7 @@ Copy each example to its live path and replace every `CHANGE_ME` using the appro
 /opt/akamai-mfa/config/mcp-v2/mcp-v2.env
 ```
 
-Set ownership `root:root` and mode `0600` (or `0400` once immutable locally). Do not put Akamai tokens, database credentials, or the trusted-ingress token in these files.
+Set ownership to `root:root`. Supported modes are `0600`, `0640`, or `0400`; when `0640` is used, the group must remain `root`. Do not put Akamai tokens, database credentials, or the trusted-ingress token in these files.
 
 The API example intentionally leaves deployment-specific non-secret values such as retention/timeout and `NO_PROXY` as `CHANGE_ME`; copy those values from the approved production configuration rather than from historical development examples.
 
@@ -128,7 +128,7 @@ The PostgreSQL environment points `POSTGRES_PASSWORD_FILE` at `/run/secrets/pg_p
 After images, live env files, and secrets are provisioned:
 
 ```sh
-sudo ./preflight.sh
+sudo sh ./preflight.sh
 ```
 
 Expected terminal gate:
@@ -154,7 +154,7 @@ If `librechat-network.service` is already enabled by the existing LibreChat depl
 ## 7. Non-destructive smoke
 
 ```sh
-sudo ./smoke.sh
+sudo sh ./smoke.sh
 ```
 
 Expected final output:
