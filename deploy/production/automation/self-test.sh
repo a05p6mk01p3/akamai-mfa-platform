@@ -3,11 +3,8 @@ set -eu
 
 BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROD_DIR=$(CDPATH= cd -- "$BASE_DIR/.." && pwd)
-
-fail() {
-    echo "AUTOMATION_SELF_TEST=FAIL reason=$1" >&2
-    exit 1
-}
+RESULT_LABEL=AUTOMATION_SELF_TEST
+. "$BASE_DIR/common.sh"
 
 for f in \
     common.sh \
@@ -23,9 +20,6 @@ do
     sh -n "$BASE_DIR/$f" || fail "shell_syntax_$f"
 done
 echo "SHELL_SYNTAX=PASS"
-
-# Load immutable identity constants only; common.sh has no side effects.
-. "$BASE_DIR/common.sh"
 
 grep -Fx "Image=$API_REF" "$PROD_DIR/quadlets/akamai-mfa-api-v2.container" >/dev/null \
     || fail api_quadlet_ref_mismatch
