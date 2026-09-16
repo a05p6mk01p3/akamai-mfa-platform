@@ -114,22 +114,35 @@ umask 077
     echo 'MCP_DESTRUCTIVE_EXECUTION_MODE=disabled'
 } > "$TMP_DIR/mcp-v2.env"
 
+POSTGRES_DST="$CONFIG_ROOT/postgres-v2/postgres-v2.env"
+API_DST="$CONFIG_ROOT/api-v2/api-v2.env"
+MCP_DST="$CONFIG_ROOT/mcp-v2/mcp-v2.env"
+
+# Validate every destination before installing any generated env file.
+precheck_env() {
+    src=$1
+    dst=$2
+    if [ -e "$dst" ] && ! cmp -s "$src" "$dst"; then
+        fail "existing_live_env_differs_$dst"
+    fi
+}
+precheck_env "$TMP_DIR/postgres-v2.env" "$POSTGRES_DST"
+precheck_env "$TMP_DIR/api-v2.env" "$API_DST"
+precheck_env "$TMP_DIR/mcp-v2.env" "$MCP_DST"
+
 install_env() {
     src=$1
     dst=$2
     if [ -e "$dst" ]; then
-        if cmp -s "$src" "$dst"; then
-            echo "ENV_UNCHANGED=$dst"
-            return 0
-        fi
-        fail "existing_live_env_differs_$dst"
+        echo "ENV_UNCHANGED=$dst"
+        return 0
     fi
     install -o root -g root -m 0640 "$src" "$dst"
     echo "ENV_INSTALLED=$dst"
 }
 
-install_env "$TMP_DIR/postgres-v2.env" "$CONFIG_ROOT/postgres-v2/postgres-v2.env"
-install_env "$TMP_DIR/api-v2.env" "$CONFIG_ROOT/api-v2/api-v2.env"
-install_env "$TMP_DIR/mcp-v2.env" "$CONFIG_ROOT/mcp-v2/mcp-v2.env"
+install_env "$TMP_DIR/postgres-v2.env" "$POSTGRES_DST"
+install_env "$TMP_DIR/api-v2.env" "$API_DST"
+install_env "$TMP_DIR/mcp-v2.env" "$MCP_DST"
 
 echo "RENDER_ENV=PASS"
