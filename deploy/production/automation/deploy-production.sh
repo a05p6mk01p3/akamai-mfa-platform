@@ -11,6 +11,7 @@ MODE=''
 CONFIG=/etc/akamai-mfa/production.conf
 SECRETS_DIR=/run/akamai-mfa-secrets
 AUTHFILE=''
+HOST_PROFILE=validated-ol8.10
 ALLOW_PLATFORM_DRIFT=0
 SKIP_NETWORK_CHECK=0
 APPROVE_START=0
@@ -27,7 +28,8 @@ options:
   --config FILE                 default: /etc/akamai-mfa/production.conf
   --secrets-dir DIR             default: /run/akamai-mfa-secrets
   --authfile FILE               root-owned Podman authfile for private GHCR
-  --allow-platform-drift        explicitly allow host outside validated baseline
+  --host-profile NAME           validated-ol8.10 (default) or corporate-rhel8.7
+  --allow-platform-drift        explicitly allow host outside selected profile
   --skip-network-check          explicitly skip github.com/ghcr.io connectivity check
   --reuse-existing-secrets      reuse already-created Podman secrets
   --approve-start               allow services to be enabled/started after preflight
@@ -44,6 +46,8 @@ while [ "$#" -gt 0 ]; do
             shift; [ "$#" -gt 0 ] || fail missing_secrets_dir_argument; SECRETS_DIR=$1 ;;
         --authfile)
             shift; [ "$#" -gt 0 ] || fail missing_authfile_argument; AUTHFILE=$1 ;;
+        --host-profile)
+            shift; [ "$#" -gt 0 ] || fail missing_host_profile_argument; HOST_PROFILE=$1 ;;
         --allow-platform-drift) ALLOW_PLATFORM_DRIFT=1 ;;
         --skip-network-check) SKIP_NETWORK_CHECK=1 ;;
         --reuse-existing-secrets) REUSE_EXISTING_SECRETS=1 ;;
@@ -72,13 +76,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 if [ "$ALLOW_PLATFORM_DRIFT" -eq 1 ] && [ "$SKIP_NETWORK_CHECK" -eq 1 ]; then
-    sh "$BASE_DIR/host-preflight.sh" --allow-platform-drift --skip-network-check
+    sh "$BASE_DIR/host-preflight.sh" --host-profile "$HOST_PROFILE" --allow-platform-drift --skip-network-check
 elif [ "$ALLOW_PLATFORM_DRIFT" -eq 1 ]; then
-    sh "$BASE_DIR/host-preflight.sh" --allow-platform-drift
+    sh "$BASE_DIR/host-preflight.sh" --host-profile "$HOST_PROFILE" --allow-platform-drift
 elif [ "$SKIP_NETWORK_CHECK" -eq 1 ]; then
-    sh "$BASE_DIR/host-preflight.sh" --skip-network-check
+    sh "$BASE_DIR/host-preflight.sh" --host-profile "$HOST_PROFILE" --skip-network-check
 else
-    sh "$BASE_DIR/host-preflight.sh"
+    sh "$BASE_DIR/host-preflight.sh" --host-profile "$HOST_PROFILE"
 fi
 
 sh "$BASE_DIR/render-env.sh" --check-only --config "$CONFIG"
