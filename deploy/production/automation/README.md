@@ -122,7 +122,9 @@ Expected terminal gate:
 DEPLOYMENT=PASS
 ```
 
-If `--approve-start` is omitted, the automation stops after `PREFLIGHT=PASS` with `DEPLOYMENT=READY_TO_START`. To continue a staged deployment, rerun with `--approve-start --reuse-existing-secrets`.
+Quadlet-generated systemd services are generated/transient units and must not be passed to `systemctl enable`. Boot persistence comes from `WantedBy=multi-user.target` in the three container Quadlets; the Quadlet generator materializes that wiring at boot and on daemon-reload. The automation therefore uses `systemctl start` for runtime activation.
+
+If `--approve-start` is omitted, the automation stops after `PREFLIGHT=PASS`, masks PostgreSQL/API/MCP so the staged state remains stopped across a reboot, and returns `STAGED_SAFE_STOP=PASS` plus `DEPLOYMENT=READY_TO_START`. To continue a staged deployment, rerun with `--approve-start --reuse-existing-secrets`; the orchestrator unmasks the three application/database units immediately before final preflight/start and arms rollback before doing so.
 
 ## Database bootstrap
 
@@ -132,6 +134,8 @@ The script never drops a table, database or volume.
 
 ## Failure handling
 
-After service startup begins, any orchestrator failure invokes `rollback.sh`, which stops and disables MCP, API and PostgreSQL in reverse dependency order. It deliberately preserves PostgreSQL data, Podman secrets, pulled images, generated runtime env files, installed Quadlets and networks for diagnosis.
+After final start approval is armed, any orchestrator failure invokes `rollback.sh`. The clean-host rollback stops and **masks** MCP, API and PostgreSQL in reverse dependency order, preserving the mask across reboot while leaving PostgreSQL data, Podman secrets, pulled images, generated runtime env files, installed Quadlets and networks intact for diagnosis.
+
+Masking is intentional: generated Quadlet services cannot be persistently disabled with `systemctl disable` because their `[Install]` wiring is regenerated. A later approved deployment removes those masks before startup.
 
 For an established deployment, use the separately documented operational rollback procedure rather than this clean-host installer.
