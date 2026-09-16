@@ -1,0 +1,26 @@
+[Unit]
+Description=Akamai MFA PostgreSQL v2
+After=network-online.target akamai-mfa-network.service
+Wants=network-online.target
+Requires=akamai-mfa-network.service
+
+[Container]
+ContainerName=akamai-mfa-postgres-v2
+Image=docker.io/library/postgres@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+
+Network=akamai-mfa.network
+
+Volume=akamai-mfa-pg-v2-data:/var/lib/postgresql
+
+Secret=akamai-mfa-pg-v2-password,target=pg_password,uid=0,gid=0,mode=0444
+
+EnvironmentFile=/opt/akamai-mfa/config/postgres-v2/postgres-v2.env
+
+[Service]
+ExecStartPost=/opt/akamai-mfa/bin/wait-postgres-v2-ready.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
