@@ -33,6 +33,21 @@ grep -Fx 'Description=Akamai MFA MCP v2 candidate' \
     "$PROD_DIR/quadlets/akamai-mfa-mcp-v2.container" >/dev/null \
     || fail mcp_canonical_description_mismatch
 
+for q in \
+    "$PROD_DIR/quadlets/akamai-mfa-postgres-v2.container" \
+    "$PROD_DIR/quadlets/akamai-mfa-api-v2.container" \
+    "$PROD_DIR/quadlets/akamai-mfa-mcp-v2.container"
+do
+    grep -Fx 'WantedBy=multi-user.target' "$q" >/dev/null \
+        || fail "quadlet_boot_wiring_missing_$(basename "$q")"
+done
+if grep -F 'systemctl enable --now' "$BASE_DIR/deploy-production.sh" >/dev/null 2>&1; then
+    fail generated_quadlet_enable_not_allowed
+fi
+grep -F 'systemctl mask' "$BASE_DIR/rollback.sh" >/dev/null \
+    || fail rollback_mask_missing
+echo "QUADLET_START_SEMANTICS=PASS"
+
 grep -Fx 'EXECUTION_BACKEND=simulation' "$PROD_DIR/env/api-v2.env.example" >/dev/null \
     || fail api_safe_state_missing
 grep -Fx 'MCP_DESTRUCTIVE_EXECUTION_MODE=disabled' "$PROD_DIR/env/mcp-v2.env.example" >/dev/null \
