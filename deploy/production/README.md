@@ -182,10 +182,14 @@ The preflight does not start application containers. It checks safe-state config
 
 ### 6. Start networks and PostgreSQL, then bootstrap the clean database
 
+Quadlet-generated systemd services are generated/transient units and are not enabled with `systemctl enable`. Boot persistence for PostgreSQL/API/MCP is supplied by `WantedBy=multi-user.target` in the container Quadlets, which the Quadlet generator materializes at boot and daemon-reload.
+
+Start the generated units directly:
+
 ```sh
-sudo systemctl enable --now akamai-mfa-network.service
-sudo systemctl enable --now librechat-network.service
-sudo systemctl enable --now akamai-mfa-postgres-v2.service
+sudo systemctl start akamai-mfa-network.service
+sudo systemctl start librechat-network.service
+sudo systemctl start akamai-mfa-postgres-v2.service
 sudo /opt/akamai-mfa/bin/wait-postgres-v2-ready.sh
 ```
 
@@ -202,13 +206,13 @@ The automated installer performs this step through `automation/bootstrap-db.sh` 
 ### 7. Start API and MCP in dependency order
 
 ```sh
-sudo systemctl enable --now akamai-mfa-api-v2.service
+sudo systemctl start akamai-mfa-api-v2.service
 sudo /opt/akamai-mfa/bin/wait-api-v2-ready.sh
-sudo systemctl enable --now akamai-mfa-mcp-v2.service
+sudo systemctl start akamai-mfa-mcp-v2.service
 sudo /opt/akamai-mfa/bin/wait-mcp-v2-ready.sh
 ```
 
-If `librechat-network.service` is already enabled by the existing LibreChat deployment, do not replace or recreate its network; verify it and continue.
+If `librechat-network.service` is already supplied by the existing LibreChat deployment, do not replace or recreate its network; verify it and continue.
 
 ### 8. Non-destructive smoke
 
@@ -233,7 +237,7 @@ The validated topology has LibreChat on `librechat.network` only. MCP is dual-ho
 
 Do not overwrite or delete the frozen v1 assets. The historical G4 rehearsal demonstrated rollback within the release target. Use `docs/OPERATIONS-AND-ROLLBACK.md` for rollback triggers and the preserved v1 image/Quadlet identities.
 
-For a new clean host, `automation/rollback.sh` is deliberately narrower: it safe-stops the newly started v2 PostgreSQL/API/MCP services and preserves data and configuration for diagnosis. It is not a substitute for the historical v1 rollback procedure.
+For a new clean host, `automation/rollback.sh` is deliberately narrower: it safe-stops and persistently masks the newly started v2 PostgreSQL/API/MCP services while preserving data and configuration for diagnosis. Masking is required because generated Quadlet services cannot be persistently disabled with `systemctl disable`; their `[Install]` wiring is regenerated. It is not a substitute for the historical v1 rollback procedure.
 
 ## Provenance
 
