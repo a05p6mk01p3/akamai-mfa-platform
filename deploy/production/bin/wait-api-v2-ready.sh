@@ -2,6 +2,7 @@
 set -eu
 
 i=0
+
 while [ "$i" -lt 90 ]; do
     if /usr/bin/podman exec akamai-mfa-api-v2 \
         python -c '
