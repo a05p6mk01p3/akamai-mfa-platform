@@ -143,13 +143,22 @@ raise SystemExit(0 if ok else 1)
 
 backup_configs() {
     local action="$1" dir
-    dir="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-${action}"
 
-    if ! mkdir -p "$dir" || \
-       ! chmod 0700 "$BACKUP_ROOT" "$dir" || \
+    if ! mkdir -p "$BACKUP_ROOT" || ! chmod 0700 "$BACKUP_ROOT"; then
+        printf 'ERROR: could not prepare protected backup root\n' >&2
+        return 1
+    fi
+
+    if ! dir="$(mktemp -d "$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-${action}.XXXXXX")"; then
+        printf 'ERROR: could not create unique protected configuration backup\n' >&2
+        return 1
+    fi
+
+    if ! chmod 0700 "$dir" || \
        ! cp -p "$API_ENV" "$dir/api-v2.env" || \
        ! cp -p "$MCP_ENV" "$dir/mcp-v2.env" || \
        ! chmod 0600 "$dir/api-v2.env" "$dir/mcp-v2.env"; then
+        rm -rf "$dir"
         printf 'ERROR: could not create protected configuration backup\n' >&2
         return 1
     fi
@@ -246,28 +255,53 @@ preflight_enable() {
     api_supports_live_backend || die "production API image does not support the CS12 live backend semantics"
 }
 
+force_mcp_safe_or_stop() {
+    if set_env "$MCP_ENV" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE" && \
+       systemctl restart "$MCP_SERVICE" && \
+       wait_active "$MCP_SERVICE" && \
+       wait_runtime_value "$MCP_CONTAINER" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE"; then
+        return 0
+    fi
+
+    printf 'CRITICAL: MCP safe state could not be verified; stopping %s\n' "$MCP_SERVICE" >&2
+    systemctl stop "$MCP_SERVICE" >/dev/null 2>&1 || true
+    return 1
+}
+
+force_api_safe_or_stop() {
+    if set_env "$API_ENV" EXECUTION_BACKEND "$SAFE_API_BACKEND" && \
+       systemctl restart "$API_SERVICE" && \
+       wait_active "$API_SERVICE" && \
+       wait_runtime_value "$API_CONTAINER" EXECUTION_BACKEND "$SAFE_API_BACKEND" && \
+       wait_api_ready_backend "$SAFE_API_BACKEND"; then
+        return 0
+    fi
+
+    printf 'CRITICAL: API safe state could not be verified; stopping %s\n' "$API_SERVICE" >&2
+    systemctl stop "$API_SERVICE" >/dev/null 2>&1 || true
+    return 1
+}
+
 rollback_enable() {
     local failed=0
-    set +e
+
     log "ROLLBACK: restoring safe baseline"
-    set_env "$MCP_ENV" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE" || failed=1
-    set_env "$API_ENV" EXECUTION_BACKEND "$SAFE_API_BACKEND" || failed=1
-    systemctl restart "$MCP_SERVICE" || failed=1
-    systemctl restart "$API_SERVICE" || failed=1
-    wait_active "$MCP_SERVICE" || failed=1
-    wait_active "$API_SERVICE" || failed=1
-    wait_runtime_value "$MCP_CONTAINER" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE" || failed=1
-    wait_runtime_value "$API_CONTAINER" EXECUTION_BACKEND "$SAFE_API_BACKEND" || failed=1
-    wait_api_ready_backend "$SAFE_API_BACKEND" || failed=1
-    cancel_auto_disable_timer
-    set -e
+
+    if ! force_mcp_safe_or_stop; then
+        failed=1
+    fi
+
+    if ! force_api_safe_or_stop; then
+        failed=1
+    fi
 
     if [[ "$failed" -ne 0 ]]; then
-        printf 'CRITICAL: rollback verification failed; investigate immediately\n' >&2
+        printf 'CRITICAL: rollback verification failed; affected service(s) stopped; timer state retained\n' >&2
         status_mode || true
         return 1
     fi
 
+    cancel_auto_disable_timer
     log "ROLLBACK: safe baseline verified"
 }
 
@@ -302,7 +336,8 @@ status_mode() {
     printf 'AUTO_DISABLE_TIMER=%s\n' "$timer_status"
 
     if [[ "$api_file" == "$SAFE_API_BACKEND" && "$api_runtime" == "$SAFE_API_BACKEND" && \
-          "$mcp_file" == "$SAFE_MCP_MODE" && "$mcp_runtime" == "$SAFE_MCP_MODE" ]]; then
+          "$mcp_file" == "$SAFE_MCP_MODE" && "$mcp_runtime" == "$SAFE_MCP_MODE" && \
+          "$timer_status" == "none" ]]; then
         printf 'DESTRUCTIVE_STATE=DISABLED\n'
     elif [[ "$api_file" == "$LIVE_API_BACKEND" && "$api_runtime" == "$LIVE_API_BACKEND" && \
             "$mcp_file" == "$ENABLED_MCP_MODE" && "$mcp_runtime" == "$ENABLED_MCP_MODE" && \
@@ -352,32 +387,27 @@ enable_mode() {
 
 disable_mode() {
     local source="${1:-manual}" failed=0
+
     if [[ "$source" != "auto" ]]; then
         backup_configs "disable-${source}" || log "WARNING: backup failed; continuing fail-closed disable"
     fi
 
     log "requesting safe baseline: MCP=disabled API=simulation"
-    set +e
-    set_env "$MCP_ENV" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE" || failed=1
-    set_env "$API_ENV" EXECUTION_BACKEND "$SAFE_API_BACKEND" || failed=1
 
-    systemctl restart "$MCP_SERVICE" || failed=1
-    systemctl restart "$API_SERVICE" || failed=1
+    if ! force_mcp_safe_or_stop; then
+        failed=1
+    fi
 
-    wait_active "$MCP_SERVICE" || failed=1
-    wait_active "$API_SERVICE" || failed=1
-    wait_runtime_value "$MCP_CONTAINER" MCP_DESTRUCTIVE_EXECUTION_MODE "$SAFE_MCP_MODE" || failed=1
-    wait_runtime_value "$API_CONTAINER" EXECUTION_BACKEND "$SAFE_API_BACKEND" || failed=1
-    wait_api_ready_backend "$SAFE_API_BACKEND" || failed=1
-
-    cancel_auto_disable_timer
-    set -e
+    if ! force_api_safe_or_stop; then
+        failed=1
+    fi
 
     if [[ "$failed" -ne 0 ]]; then
         status_mode || true
-        die "safe baseline was requested but runtime verification failed; investigate immediately"
+        die "safe baseline could not be verified; affected service(s) stopped and timer state retained"
     fi
 
+    cancel_auto_disable_timer
     log "safe baseline verified"
     status_mode
 }
