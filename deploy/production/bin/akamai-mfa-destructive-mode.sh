@@ -94,7 +94,7 @@ set_env() {
 runtime_env() {
     local container="$1" key="$2"
     podman inspect "$container" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
-        awk -F= -v key="$key" '$1 == key { print substr($0, length($1) + 2); found=1; exit } END { if (!found) exit 2 }'
+        awk -F= -v key="$key" '$1 == key && !found { print substr($0, length($1) + 2); found=1 } END { if (!found) exit 2 }'
 }
 
 wait_active() {
