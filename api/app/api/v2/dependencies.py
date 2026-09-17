@@ -6,9 +6,9 @@ from ...clients.akamai_mfa import AkamaiMfaClient
 from ...clients.eaa import EaaClient
 from ...config import Settings
 from ...database import Database
-from ...operations.execution import build_execution_adapter
 from ...operations.manager import OperationManager
 from ...operations.repository import OperationRepository
+from ...operations.runtime import build_runtime_execution_adapter
 from ...references.repository import SafeReferenceRepository
 from ...references.service import SafeReferenceService
 from ...services.akamai_mfa import AkamaiMfaService
@@ -54,7 +54,7 @@ def operation_manager() -> OperationManager:
         reference_service=reference_service(),
         eaa_service=eaa,
         akamai_mfa_service=amfa,
-        execution_adapter=build_execution_adapter(
+        execution_adapter=build_runtime_execution_adapter(
             settings(),
             eaa_service=eaa,
             akamai_mfa_service=amfa,
