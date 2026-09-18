@@ -17,6 +17,7 @@ LIVE_API_BACKEND="live"
 SAFE_MCP_MODE="disabled"
 ENABLED_MCP_MODE="enabled"
 CONFIRM_TOKEN="ENABLE-AKAMAI-MFA-DESTRUCTIVE"
+PERSISTENT_CONFIRM_TOKEN="ENABLE-AKAMAI-MFA-DESTRUCTIVE-PERSISTENT"
 FROZEN_API_DIGEST="sha256:5d79ba99978e5309a26f2f6aa1285b8c2da11547e47b1e55169e6f9252c6a8af"
 
 log() {
@@ -33,12 +34,15 @@ usage() {
 Usage:
   akamai-mfa-destructive-mode status
   akamai-mfa-destructive-mode enable --minutes N --confirm ENABLE-AKAMAI-MFA-DESTRUCTIVE
+  akamai-mfa-destructive-mode enable --persistent --confirm ENABLE-AKAMAI-MFA-DESTRUCTIVE-PERSISTENT
   akamai-mfa-destructive-mode disable [--auto]
 
 CS12 semantics:
   safe baseline: API EXECUTION_BACKEND=simulation; MCP destructive mode=disabled
-  enabled window: API EXECUTION_BACKEND=live; MCP destructive mode=enabled
-  enable is bounded to 5..120 minutes and requires a verified auto-disable timer
+  bounded enable: API EXECUTION_BACKEND=live; MCP destructive mode=enabled
+                  with a verified auto-disable timer (5..120 minutes)
+  persistent enable: API EXECUTION_BACKEND=live; MCP destructive mode=enabled
+                     without an auto-disable timer; remains enabled until explicit disable
   enable is refused unless the production API image supports the CS12 live backend
   disable is fail-closed and restores the safe baseline without a domain selector
 USAGE
@@ -343,6 +347,10 @@ status_mode() {
             "$mcp_file" == "$ENABLED_MCP_MODE" && "$mcp_runtime" == "$ENABLED_MCP_MODE" && \
             "$timer_status" == active:* ]]; then
         printf 'DESTRUCTIVE_STATE=ENABLED_BOUNDED\n'
+    elif [[ "$api_file" == "$LIVE_API_BACKEND" && "$api_runtime" == "$LIVE_API_BACKEND" && \
+            "$mcp_file" == "$ENABLED_MCP_MODE" && "$mcp_runtime" == "$ENABLED_MCP_MODE" && \
+            "$timer_status" == "none" ]]; then
+        printf 'DESTRUCTIVE_STATE=ENABLED_PERSISTENT\n'
     else
         printf 'DESTRUCTIVE_STATE=INCONSISTENT\n'
         return 2
@@ -350,18 +358,34 @@ status_mode() {
 }
 
 enable_mode() {
-    local minutes="$1" confirm="$2"
+    local mode="$1" minutes="$2" confirm="$3"
 
-    [[ "$confirm" == "$CONFIRM_TOKEN" ]] || die "explicit confirmation missing"
-    [[ "$minutes" =~ ^[0-9]+$ ]] || die "--minutes must be an integer"
-    (( minutes >= 5 && minutes <= 120 )) || die "--minutes must be between 5 and 120"
+    case "$mode" in
+        bounded)
+            [[ "$confirm" == "$CONFIRM_TOKEN" ]] || die "explicit bounded confirmation missing"
+            [[ "$minutes" =~ ^[0-9]+$ ]] || die "--minutes must be an integer"
+            (( minutes >= 5 && minutes <= 120 )) || die "--minutes must be between 5 and 120"
+            ;;
+        persistent)
+            [[ "$confirm" == "$PERSISTENT_CONFIRM_TOKEN" ]] || \
+                die "explicit persistent confirmation missing"
+            [[ -z "$minutes" ]] || die "persistent mode does not accept --minutes"
+            ;;
+        *)
+            die "internal enable mode is invalid"
+            ;;
+    esac
 
     preflight_enable
-    backup_configs "enable" || die "could not create pre-enable configuration backup"
+    backup_configs "enable-${mode}" || die "could not create pre-enable configuration backup"
 
-    if ! schedule_auto_disable "$minutes"; then
-        cancel_auto_disable_timer
-        die "could not create and verify auto-disable timer; destructive mode remains disabled"
+    if [[ "$mode" == "bounded" ]]; then
+        if ! schedule_auto_disable "$minutes"; then
+            cancel_auto_disable_timer
+            die "could not create and verify auto-disable timer; destructive mode remains disabled"
+        fi
+    else
+        log "persistent destructive mode requested: no auto-disable timer will be created"
     fi
 
     log "enabling API live backend while MCP remains disabled"
@@ -381,7 +405,11 @@ enable_mode() {
         abort_enable "MCP failed to enter enabled mode"
     fi
 
-    log "destructive mode enabled for a bounded ${minutes}-minute window"
+    if [[ "$mode" == "bounded" ]]; then
+        log "destructive mode enabled for a bounded ${minutes}-minute window"
+    else
+        log "destructive mode enabled persistently until explicit disable"
+    fi
     status_mode
 }
 
@@ -428,13 +456,18 @@ main() {
             status_mode
             ;;
         enable)
-            local minutes="" confirm=""
+            local minutes="" confirm="" persistent=0
             while [[ "$#" -gt 0 ]]; do
                 case "$1" in
                     --minutes)
                         [[ "$#" -ge 2 ]] || die "--minutes requires a value"
                         minutes="$2"
                         shift 2
+                        ;;
+                    --persistent)
+                        [[ "$persistent" -eq 0 ]] || die "--persistent specified more than once"
+                        persistent=1
+                        shift
                         ;;
                     --confirm)
                         [[ "$#" -ge 2 ]] || die "--confirm requires a value"
@@ -446,8 +479,13 @@ main() {
                         ;;
                 esac
             done
-            [[ -n "$minutes" ]] || die "--minutes is required"
-            enable_mode "$minutes" "$confirm"
+            if [[ "$persistent" -eq 1 ]]; then
+                [[ -z "$minutes" ]] || die "--persistent and --minutes are mutually exclusive"
+                enable_mode persistent "" "$confirm"
+            else
+                [[ -n "$minutes" ]] || die "--minutes is required unless --persistent is used"
+                enable_mode bounded "$minutes" "$confirm"
+            fi
             ;;
         disable)
             if [[ "$#" -eq 0 ]]; then
