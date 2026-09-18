@@ -500,21 +500,3 @@ class AkamaiMfaTenantValidationExecutionAdapter:
             "AKAMAI_MFA_POSTCHECK_TARGET_REMAINS",
             safe_details,
         )
-
-def build_execution_adapter(
-    settings: Settings,
-    *,
-    eaa_service: EaaService | None = None,
-    akamai_mfa_service: AkamaiMfaService | None = None,
-) -> ExecutionAdapter:
-    if settings.execution_backend == "simulation":
-        return SimulationExecutionAdapter(settings)
-    if settings.execution_backend == "eaa_validation":
-        if eaa_service is None:
-            raise ExecutionBackendDisabled("EAA validation service unavailable")
-        return EaaTenantValidationExecutionAdapter(eaa_service)
-    if settings.execution_backend == "akamai_mfa_validation":
-        if akamai_mfa_service is None:
-            raise ExecutionBackendDisabled("Akamai MFA validation service unavailable")
-        return AkamaiMfaTenantValidationExecutionAdapter(akamai_mfa_service)
-    return DisabledExecutionAdapter()

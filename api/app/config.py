@@ -54,12 +54,14 @@ class Settings:
 
     @property
     def execution_framework_enabled(self) -> bool:
-        return self.execution_backend in {"simulation", "eaa_validation", "akamai_mfa_validation"}
+        return self.execution_backend in {"simulation", "live"}
 
     @property
     def destructive_operations_enabled(self) -> bool:
-        # eaa_validation can issue one real EAA OTP reset POST.
-        return self.execution_backend in {"eaa_validation", "akamai_mfa_validation"}
+        # A single operator-facing live gate enables the destructive framework.
+        # Domain separation remains enforced by the persisted operation type and
+        # its domain-specific execution adapter.
+        return self.execution_backend == "live"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -78,7 +80,9 @@ class Settings:
             operation_ttl_seconds=max(60, int(os.getenv("OPERATION_TTL_SECONDS", "300"))),
             safe_ref_ttl_seconds=max(60, int(os.getenv("SAFE_REF_TTL_SECONDS", "300"))),
             execution_backend=_enum_env(
-                "EXECUTION_BACKEND", "disabled", {"disabled", "simulation", "eaa_validation", "akamai_mfa_validation"}
+                "EXECUTION_BACKEND",
+                "disabled",
+                {"disabled", "simulation", "live"},
             ),
             simulation_primitive_outcome=_enum_env(
                 "SIMULATION_PRIMITIVE_OUTCOME",
